@@ -1,0 +1,339 @@
+{
+  "info": {
+    "_postman_id": "d47e9b1a-2c6f-4a91-9e3d-7b58f4c1a9e3",
+    "name": "BillDesk Netbanking Simulator - IDFC (Normal Transaction)",
+    "description": "IDFC Bank Netbanking Simulator API collection, updated for the Normal-Transaction-only IdfcService. Reproduces IDFC's encrypted-envelope wire format exactly as implemented in IdfcService/IdfcEncryptionUtil/IdfcChecksumUtil: AES/ECB/PKCS5 for encParams (key = first 16 bytes of SHA-256(encryption-key)) and HmacSHA512 for CHECKSUM (key = Base64(checksum-key) UTF-8 bytes). Matches simulator.idfc.checksum-key / simulator.idfc.encryption-key in application.properties.\n\nScope: PDF section 6 (Transaction/Payment API, Normal Transaction only - no Mutual Fund/MCC=6211 handling, ACCNO always blank) and PDF section 7 (Verification), reused via the simulator's existing double-verification route rather than a separate OAuth2-protected endpoint. Status and Refund APIs (PDF sections 8-9) are intentionally not implemented.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "56643564"
+  },
+  "item": [
+    {
+      "name": "1. IDFC - TXN_INIT_URL (encrypted, Normal Transaction)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {},
+            "exec": [
+              "function nz(v) { return v === undefined || v === null ? '' : String(v); }",
+              "",
+              "var mid = pm.variables.get('merchantId');",
+              "var pid = pm.variables.get('txnId');",
+              "var amt = pm.variables.get('txnAmount');",
+              "var returl = pm.variables.get('dynamicUrl');",
+              "var txntype = pm.variables.get('txnType');",
+              "var nar = pm.variables.get('narration');",
+              "var chnl = pm.variables.get('channel');",
+              "var mcc = pm.variables.get('mcc');",
+              "var cur = pm.variables.get('txnCurrency');",
+              "var accno = ''; // Normal Transaction only - ACCNO is always blank (no MCC=6211/MF handling)",
+              "",
+              "var checksumKey = pm.variables.get('idfcChecksumKey');",
+              "var encryptionKey = pm.variables.get('idfcEncryptionKey');",
+              "",
+              "// PDF section 6 payment checksum string: MID|PID|AMT|RETURL|TXNTYPE|ACCNO|NAR|CHNL|MCC|CUR",
+              "var checksumString = nz(mid) + '|' + nz(pid) + '|' + nz(amt) + '|' + nz(returl) + '|'",
+              "  + nz(txntype) + '|' + nz(accno) + '|' + nz(nar) + '|' + nz(chnl) + '|' + nz(mcc) + '|' + nz(cur);",
+              "",
+              "var checksum;",
+              "if (checksumKey && checksumKey.trim() !== '') {",
+              "  // IdfcChecksumUtil: HmacSHA512, key = Base64(secret) taken as UTF-8 bytes (not decoded)",
+              "  var base64Key = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(checksumKey));",
+              "  checksum = CryptoJS.HmacSHA512(checksumString, base64Key).toString(CryptoJS.enc.Hex).toUpperCase();",
+              "} else {",
+              "  // Server-side simulator.idfc.checksum-key is blank by default -> presence-only check.",
+              "  // CHECKSUM must still be present/non-blank (it's in REQUIRED_INIT_FIELDS).",
+              "  checksum = 'POSTMAN-TEST-CHECKSUM';",
+              "}",
+              "",
+              "// Normal Transaction pairs (PDF section 6) - ACCNO always included, always blank.",
+              "var pairs = [",
+              "  { k: 'MID', v: nz(mid) },",
+              "  { k: 'PID', v: nz(pid) },",
+              "  { k: 'AMT', v: nz(amt) },",
+              "  { k: 'RETURL', v: nz(returl) },",
+              "  { k: 'TXNTYPE', v: nz(txntype) },",
+              "  { k: 'ACCNO', v: nz(accno) },",
+              "  { k: 'NAR', v: nz(nar) },",
+              "  { k: 'CHNL', v: nz(chnl) },",
+              "  { k: 'MCC', v: nz(mcc) },",
+              "  { k: 'CUR', v: nz(cur) },",
+              "  { k: 'CHECKSUM', v: checksum }",
+              "];",
+              "",
+              "var plainJson = JSON.stringify(pairs);",
+              "",
+              "function deriveKeyWordArray(secret) {",
+              "  // IdfcEncryptionUtil.deriveKey: first 16 bytes of SHA-256(secret), used as raw AES key",
+              "  var hash = CryptoJS.SHA256(secret || '');",
+              "  return CryptoJS.lib.WordArray.create(hash.words.slice(0, 4), 16);",
+              "}",
+              "",
+              "var aesKey = deriveKeyWordArray(encryptionKey);",
+              "var encrypted = CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(plainJson), aesKey, {",
+              "  mode: CryptoJS.mode.ECB,",
+              "  padding: CryptoJS.pad.Pkcs7",
+              "});",
+              "var encParams = encrypted.toString(); // Base64 ciphertext (no salt header, since key is a raw WordArray not a passphrase)",
+              "",
+              "pm.variables.set('idfcEncParams', encParams);",
+              "pm.variables.set('idfcMid', mid);",
+              "",
+              "console.log('IDFC plaintext k/v payload:', plainJson);",
+              "console.log('IDFC checksum string:', checksumString);",
+              "console.log('IDFC CHECKSUM:', checksum);",
+              "console.log('IDFC encParams:', encParams);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": { "type": "text/javascript", "packages": {}, "requests": {}, "exec": [""] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "isEncReq", "value": "Y", "type": "text" },
+            { "key": "mid", "value": "{{idfcMid}}", "type": "text" },
+            { "key": "encParams", "value": "{{idfcEncParams}}", "type": "text" },
+            { "key": "serviceName", "value": "{{idfcServiceName}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/simulator/netbanking/{{bankId}}",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "simulator", "netbanking", "{{bankId}}" ]
+        },
+        "description": "IDFC TXN_INIT_URL - PG posts the encrypted envelope (isEncReq/mid/encParams/serviceName). IdfcService#preprocessInit decrypts encParams into MID/PID/AMT/RETURL/TXNTYPE/NAR/CHNL/MCC/CUR/CHECKSUM before validation. Normal Transaction only - ACCNO is always blank, no MCC=6211 Mutual Fund handling. Expect a 303 redirect to the simulator page on success, or 400 with the failing field/reason on validation failure."
+      },
+      "response": []
+    },
+    {
+      "name": "2. IDFC - Open Simulator Page",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/simulator/netbanking/{{bankId}}/{{txnId}}",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "simulator", "netbanking", "{{bankId}}", "{{txnId}}" ]
+        },
+        "description": "Renders the tester-facing page for the transaction created by step 1. Not bank-specific."
+      },
+      "response": []
+    },
+    {
+      "name": "3. IDFC - Submit SUCCESS",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "result", "value": "SUCCESS", "type": "text" },
+            { "key": "delivery", "value": "NORMAL", "type": "text" },
+            { "key": "failureReason", "value": "", "type": "text", "disabled": true },
+            { "key": "errorCode", "value": "", "type": "text", "disabled": true },
+            { "key": "delaySeconds", "value": "0", "type": "text", "disabled": true }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/simulator/netbanking/{{bankId}}/{{txnId}}/submit",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "simulator", "netbanking", "{{bankId}}", "{{txnId}}", "submit" ]
+        },
+        "description": "Generic submit endpoint. IdfcService#buildCallbackResponse builds the encrypted merchant_response envelope (Normal Transaction - ACCNO blank) and POSTs it (S2S, JSON body) to RETURL - that callback is not returned in this response; you'll only see {\"status\":\"sent\"}."
+      },
+      "response": []
+    },
+    {
+      "name": "4. IDFC - Submit FAILURE",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "result", "value": "FAILURE", "type": "text" },
+            { "key": "delivery", "value": "S2S", "type": "text" },
+            { "key": "failureReason", "value": "Account/Transaction Failure", "type": "text" },
+            { "key": "errorCode", "value": "", "type": "text" },
+            { "key": "delaySeconds", "value": "0", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/simulator/netbanking/{{bankId}}/{{txnId}}/submit",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "simulator", "netbanking", "{{bankId}}", "{{txnId}}", "submit" ]
+        },
+        "description": "failureReason defaults to one of IdfcService.KNOWN_FAILURE_REASONS; you can substitute any of the other four listed in IdfcService.java."
+      },
+      "response": []
+    },
+    {
+      "name": "5. IDFC - Verify Transaction (double-verification, encrypted)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {},
+            "exec": [
+              "function nz(v) { return v === undefined || v === null ? '' : String(v); }",
+              "",
+              "var mid = pm.variables.get('merchantId');",
+              "var pid = pm.variables.get('txnId');",
+              "var amt = pm.variables.get('txnAmount');",
+              "var mcc = pm.variables.get('mcc');",
+              "var bid = pm.variables.get('verifyBankRef');",
+              "var accno = ''; // Normal Transaction only - always blank",
+              "var txntype = 'Verification'; // IdfcService#validateVerification requires this literal value",
+              "",
+              "var checksumKey = pm.variables.get('idfcChecksumKey');",
+              "var encryptionKey = pm.variables.get('idfcEncryptionKey');",
+              "",
+              "// PDF section 7 verification-request checksum string: MID|PID|AMT|ACCNO|TXNTYPE|BID|MCC",
+              "var checksumString = nz(mid) + '|' + nz(pid) + '|' + nz(amt) + '|' + nz(accno) + '|'",
+              "  + nz(txntype) + '|' + nz(bid) + '|' + nz(mcc);",
+              "",
+              "var checksum;",
+              "if (checksumKey && checksumKey.trim() !== '') {",
+              "  var base64Key = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(checksumKey));",
+              "  checksum = CryptoJS.HmacSHA512(checksumString, base64Key).toString(CryptoJS.enc.Hex).toUpperCase();",
+              "} else {",
+              "  checksum = 'POSTMAN-TEST-CHECKSUM';",
+              "}",
+              "",
+              "// MID/PID/AMT are cross-checked against the record captured at init (step 1) -",
+              "// keep merchantId/txnId/txnAmount collection variables identical to what step 1 sent.",
+              "// BID is only required to be non-blank (not cross-checked), so any placeholder works.",
+              "var pairs = [",
+              "  { k: 'MID', v: nz(mid) },",
+              "  { k: 'PID', v: nz(pid) },",
+              "  { k: 'AMT', v: nz(amt) },",
+              "  { k: 'TXNTYPE', v: nz(txntype) },",
+              "  { k: 'BID', v: nz(bid) },",
+              "  { k: 'MCC', v: nz(mcc) },",
+              "  { k: 'CHECKSUM', v: checksum }",
+              "];",
+              "",
+              "var plainJson = JSON.stringify(pairs);",
+              "",
+              "function deriveKeyWordArray(secret) {",
+              "  var hash = CryptoJS.SHA256(secret || '');",
+              "  return CryptoJS.lib.WordArray.create(hash.words.slice(0, 4), 16);",
+              "}",
+              "",
+              "var aesKey = deriveKeyWordArray(encryptionKey);",
+              "var encrypted = CryptoJS.AES.encrypt(CryptoJS.enc.Utf8.parse(plainJson), aesKey, {",
+              "  mode: CryptoJS.mode.ECB,",
+              "  padding: CryptoJS.pad.Pkcs7",
+              "});",
+              "var encParams = encrypted.toString();",
+              "",
+              "pm.variables.set('idfcVerifyEncParams', encParams);",
+              "pm.variables.set('idfcMid', mid);",
+              "",
+              "console.log('IDFC verify plaintext payload:', plainJson);",
+              "console.log('IDFC verify checksum string:', checksumString);",
+              "console.log('IDFC verify encParams:', encParams);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "packages": {},
+            "requests": {},
+            "exec": [
+              "// Best-effort decrypt of the response so you can read it without leaving Postman.",
+              "try {",
+              "  var json = pm.response.json();",
+              "  console.log('IDFC verify raw response:', json);",
+              "  if (json.response) {",
+              "    var encryptionKey = pm.variables.get('idfcEncryptionKey');",
+              "    var hash = CryptoJS.SHA256(encryptionKey || '');",
+              "    var aesKey = CryptoJS.lib.WordArray.create(hash.words.slice(0, 4), 16);",
+              "    var decrypted = CryptoJS.AES.decrypt(json.response, aesKey, {",
+              "      mode: CryptoJS.mode.ECB,",
+              "      padding: CryptoJS.pad.Pkcs7",
+              "    });",
+              "    var plaintext = decrypted.toString(CryptoJS.enc.Utf8);",
+              "    console.log('IDFC verify decrypted response fields:', plaintext);",
+              "  }",
+              "} catch (e) {",
+              "  console.log('Could not parse/decrypt IDFC verify response:', e.message);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "isEncReq", "value": "Y", "type": "text" },
+            { "key": "mid", "value": "{{idfcMid}}", "type": "text" },
+            { "key": "encParams", "value": "{{idfcVerifyEncParams}}", "type": "text" },
+            { "key": "serviceName", "value": "{{idfcServiceName}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/simulator/netbanking/checkTxnStatus/{{bankId}}",
+          "host": [ "{{baseUrl}}" ],
+          "path": [ "simulator", "netbanking", "checkTxnStatus", "{{bankId}}" ]
+        },
+        "description": "PG's QRY_INIT_URL double-verification call, reused for IDFC's Verification API (PDF section 7) instead of a dedicated OAuth2-protected endpoint. Response is JSON {respCode, response, errorMsg} where response is the AES-encrypted key/value array (decrypted automatically by this request's Tests script and logged to the Postman console). No Status or Refund endpoints exist in this simulator."
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": { "type": "text/javascript", "packages": {}, "requests": {}, "exec": [""] }
+    },
+    {
+      "listen": "test",
+      "script": { "type": "text/javascript", "packages": {}, "requests": {}, "exec": [""] }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:7000" },
+    { "key": "bankId", "value": "IDFC" },
+    { "key": "merchantId", "value": "IDFCMERCHANT01" },
+    { "key": "txnId", "value": "IDFC0001" },
+    { "key": "txnAmount", "value": "100.00" },
+    { "key": "txnCurrency", "value": "INR" },
+    { "key": "dynamicUrl", "value": "http://localhost:8080/payment/return" },
+    { "key": "txnType", "value": "Payment" },
+    { "key": "narration", "value": "Test Payment" },
+    { "key": "channel", "value": "NB" },
+    { "key": "mcc", "value": "3020" },
+    { "key": "verifyBankRef", "value": "BDVERIFYTEST01" },
+    { "key": "idfcServiceName", "value": "NetbankingTxn" },
+    { "key": "idfcChecksumKey", "value": "test123" },
+    { "key": "idfcEncryptionKey", "value": "test123" },
+    { "key": "idfcEncParams", "value": "" },
+    { "key": "idfcVerifyEncParams", "value": "" },
+    { "key": "idfcMid", "value": "" }
+  ]
+}
